@@ -66,7 +66,7 @@ model_dim = 512
 num_heads = 8
 mask_attention = torch.IntTensor([[ 1 if i < 8 else 0 for i in range(10) ]])
 attention_layer = MultiHeadSelfAttention(model_dim, num_heads)
-inputs = torch.randn(1, 10, model_dim)  # 假设我们有一个批次大小为1，序列长度为100，模型维度为512的输入
+inputs = torch.randn(1, 10, model_dim)  # 假设我们有一个批次大小为1，序列长度为10，模型维度为512的输入
 outputs, attention_weight= attention_layer(inputs, mask_attention)
 print(outputs)
 print(attention_weight)
