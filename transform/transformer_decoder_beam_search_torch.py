@@ -96,8 +96,6 @@ class TransformerDecoder(nn.Module):
         - nhead: 多头注意力的头数
         - dim_feedforward: 前馈神经网络的维度，默认为2048
         - dropout: Dropout比例，默认为0.1
-        - activation: 激活函数名称，默认为"relu"
-        - strategies: 解码策略字典，默认包含"greedy"和"beam"两种策略
         """
         super().__init__()
         self.embed = nn.Embedding(vocab_size, d_model)
