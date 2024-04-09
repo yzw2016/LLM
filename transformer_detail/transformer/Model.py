@@ -58,9 +58,10 @@ def get_pad_mask(seq, pad_idx):
     - seq: 输入序列张量，形状为[B, L]，其中B为批次大小，L为序列长度
 
     返回值:
-    - 掩码张量，形状为[B, L, L]，其中B为批次大小，L为序列长度
+    - 掩码张量，形状为[B, 1, L]，其中B为批次大小，L为序列长度
    """
-    return (seq != pad_idx).unsqueeze(1).expand(-1, seq.size(1), -1)
+ #   return (seq != pad_idx).unsqueeze(1).expand(-1, seq.size(1), -1)
+    return (seq != pad_idx).unsqueeze(-2)
 
 def get_subsequent_mask(seq):
     """
@@ -121,11 +122,9 @@ class Encoder(nn.Module):
         - 如果return_attns为False，则仅返回编码器输出。
         """
         enc_output = self.src_word_emb(src_seq)  # 词嵌入
-        print(enc_output.shape)
         if self.scale_emb:
             enc_output = enc_output * np.sqrt(self.d_model)  # 缩放嵌入层输出
         enc_output = self.dropout(self.position_enc(enc_output))  # 加入位置编码
-        print(enc_output.shape)
         enc_output = self.layer_norm(enc_output)  # 层归一化
         enc_slf_attn_list = []
         for enc_layer in self.layer_stack:
@@ -134,7 +133,6 @@ class Encoder(nn.Module):
                 enc_slf_attn_list += [enc_slf_attn]  # 收集注意力权重
         if return_attns:
             return enc_output, enc_slf_attn_list
-        print(enc_output.shape)
         return enc_output,
 
 class Decoder(nn.Module):
