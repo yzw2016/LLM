@@ -1,22 +1,14 @@
-import torch
-import torch.nn as nn
-from Layers import EncoderLayer, DecoderLayer
+import paddle
+import paddle.nn as nn
 import numpy as np
-author = "尧志文"
+from Layers import EncoderLayer, DecoderLayer
+author = "yaozhiwen"
 
-class PositionalEncoding(nn.Module):
-    """
-    位置编码类，用于增加模型对位置信息的感知能力。
-
-    参数:
-    - d_hid: 隐藏层维度
-    - n_position: 位置编码的最大长度，默认为200
-    """
+class PositionalEncoding(nn.Layer):
     def __init__(self, d_hid, n_position=200):
         super(PositionalEncoding, self).__init__()
-        # 注册位置编码表为模型的buffer，不会被优化器更新
+        
         self.register_buffer('pos_table', self._get_sinusoid_encoding_table(n_position, d_hid))
-
     def _get_sinusoid_encoding_table(self, n_position, d_hid):
         """
         生成正弦编码表。
@@ -35,8 +27,8 @@ class PositionalEncoding(nn.Module):
         # 对编码进行正弦和余弦操作
         pe_table[:, 0::2] = np.sin(pe_table[:, 0::2])  # 对偶数索引应用正弦函数
         pe_table[:, 1::2] = np.cos(pe_table[:, 1::2])  # 对奇数索引应用余弦函数
-        return torch.FloatTensor(pe_table).unsqueeze(0)
-
+        return paddle.to_tensor(pe_table).unsqueeze(0)
+    
     def forward(self, x):
         """
         前向传播过程，将位置编码添加到输入张量x中。
@@ -48,7 +40,7 @@ class PositionalEncoding(nn.Module):
         - 添加了位置编码的输入张量x。
         """
         # 在位置编码表中选择与输入序列长度相同的编码，并与输入张量相加
-        return x + self.pos_table[:, :x.size(1), :].clone().detach()
+        return x + self.pos_table[:, :x.shape[1], :].clone().detach()
     
 def get_pad_mask(seq, pad_idx):
     """
@@ -71,12 +63,11 @@ def get_subsequent_mask(seq):
     返回值:
     - 掩码张量，形状为[B, L, L]，其中B为批次大小，L为序列长度
     """
-    mask = torch.tril(torch.ones(seq.size(1), seq.size(1)), diagonal=0)
-    mask = mask.bool().unsqueeze(0).expand(seq.size(0), -1, -1)
+    mask = paddle.tril(paddle.ones([seq.shape[1], seq.shape[1]]), diagonal=0)
+    mask = mask.astype('bool').unsqueeze(0).expand([seq.shape[0], seq.shape[1], seq.shape[1]])
     return mask
 
-
-class Encoder(nn.Module):
+class Encoder(nn.Layer):
     """
     用于定义一个编码器，可以处理变长输入序列。
     
@@ -97,16 +88,16 @@ class Encoder(nn.Module):
     def __init__(self, n_src_vocab,  d_word_vec, n_layers, n_head, d_k, d_v,
                  d_model, d_inner, pad_idx, dropout=0.1, n_position=200, scale_emb=False):
         super().__init__()
-        self.src_word_emb = nn.Embedding(n_src_vocab, d_word_vec, padding_idx=pad_idx)  # 词嵌入层
-        self.position_enc = PositionalEncoding(d_word_vec, n_position=n_position)  # 位置编码层
-        self.dropout = nn.Dropout(dropout)  # Dropout层
-        self.layer_stack = nn.ModuleList([
+        self.src_word_emb = nn.Embedding(n_src_vocab, d_word_vec, padding_idx=pad_idx)
+        self.position_enc = PositionalEncoding(d_word_vec, n_position=n_position)
+        self.dropout = nn.Dropout(dropout)
+        self.layer_stack = nn.LayerList([
             EncoderLayer(d_model, d_inner, n_head, d_k, d_v, dropout=dropout)
-            for _ in range(n_layers)])  # 编码器层堆栈
-        self.layer_norm = nn.LayerNorm(d_model, eps=1e-6)  # 层归一化
-        self.scale_emb = scale_emb  # 是否缩放嵌入层输出
-        self.d_model = d_model  # 模型维度
-
+            for _ in range(n_layers)])
+        self.layer_norm = nn.LayerNorm(d_model, epsilon=1e-6)
+        self.scale_emb = scale_emb
+        self.d_model = d_model
+    
     def forward(self, src_seq, src_mask=None, return_attns=False):
         """
         前向传播函数。
@@ -125,7 +116,7 @@ class Encoder(nn.Module):
         if self.scale_emb:
             enc_output = enc_output * np.sqrt(self.d_model)  # 缩放嵌入层输出
         enc_output = self.dropout(self.position_enc(enc_output))  # 加入位置编码
-        enc_output = self.layer_norm(enc_output)  # 层归一化
+        enc_output = self.layer_norm(enc_output.astype('float32'))  # 层归一化
         enc_slf_attn_list = []
         for enc_layer in self.layer_stack:
             enc_output, enc_slf_attn = enc_layer(enc_output, slf_attn_mask=src_mask)
@@ -135,7 +126,7 @@ class Encoder(nn.Module):
             return enc_output, enc_slf_attn_list
         return enc_output,
 
-class Decoder(nn.Module):
+class Decoder(nn.Layer):
     """
     解码器类，用于处理序列解码任务。
     
@@ -156,30 +147,29 @@ class Decoder(nn.Module):
     def __init__(self, n_tgt_vocab, d_word_vec, n_layers, n_head, d_k, d_v,
                  d_model, d_inner, pad_idx, dropout=0.1, n_position=200, scale_emb=False):
         super().__init__()
-        self.trg_word_emb = nn.Embedding(n_tgt_vocab, d_word_vec, padding_idx=pad_idx)  # 目标词嵌入
+        self.trg_word_emb = nn.Embedding(n_tgt_vocab, d_word_vec, padding_idx=pad_idx)
         self.position_enc = PositionalEncoding(d_word_vec, n_position=n_position)  # 位置编码
         self.dropout = nn.Dropout(dropout)  # Dropout层
-        self.layer_stack = nn.ModuleList([  # 解码器层堆栈
+        self.layer_stack = nn.LayerList([  # 解码器层堆栈
             DecoderLayer(d_model, d_inner, n_head, d_k, d_v, dropout=dropout)
             for _ in range(n_layers)])
-        self.layer_norm = nn.LayerNorm(d_model, eps=1e-6)  # 层归一化
+        self.layer_norm = nn.LayerNorm(d_model, epsilon=1e-6)  # 层归一化
         self.scale_emb = scale_emb  # 是否缩放嵌入层
         self.d_model = d_model  # 模型维度
-    
+
     def forward(self, trg_seq, enc_output, src_mask=None, trg_mask=None,  return_attns=False):
         """
         前向传播函数。
         
         参数:
-        - tgt_seq: 目标序列。
-        - enc_output: 编码器的输出。
-        - non_pad_mask: 非填充掩码，用于关注非填充位置。
-        - src_mask: 源序列的掩码，用于注意力机制。
-        - trg_mask: 目标序列的掩码，用于防止当前位置预测未来的单词。
-        - return_attns: 是否返回注意力权重，默认为False。
+        - trg_seq: 目标序列。
+        - enc_output: 编码器输出。
+        - src_mask: 源序列的填充掩码。
+        - trg_mask: 目标序列的填充掩码。
+        - return_attns: 是否返回每一层的注意力权重，默认为False。
         
-        返回值:
-        - 如果return_attns为True，则返回解码器输出、自注意力权重列表和编码器-解码器注意力权重列表。
+        返回:
+        - 如果return_attns为True，则返回解码器输出和注意力权重列表。
         - 如果return_attns为False，则仅返回解码器输出。
         """
         dec_slf_attn_list, dec_enc_attn_list = [], []  # 用于存储注意力权重的列表
@@ -187,7 +177,7 @@ class Decoder(nn.Module):
         if self.scale_emb:
             dec_output = dec_output * np.sqrt(self.d_model)  # 缩放嵌入层输出
         dec_output = self.dropout(self.position_enc(dec_output))  # 位置编码和dropout
-        dec_output = self.layer_norm(dec_output)  # 层归一化
+        dec_output = self.layer_norm(dec_output.astype('float32'))  # 层归一化
         for dec_layer in self.layer_stack:
             dec_output, dec_slf_attn, dec_enc_attn = dec_layer(
                 dec_output, enc_output, slf_attn_mask=src_mask, dec_enc_attn_mask=trg_mask)
@@ -197,10 +187,10 @@ class Decoder(nn.Module):
         if return_attns:
             return dec_output, dec_slf_attn_list, dec_enc_attn_list
         return dec_output,
-    
-class Transformer(nn.Module):
+
+class Transformer(nn.Layer):
     """
-    实现一个Transformer模型，用于序列到序列的学习任务。
+    Transformer模型类，用于序列处理任务。
     
     参数:
     - n_src_vocab: 源语言词汇表大小。
@@ -244,13 +234,16 @@ class Transformer(nn.Module):
         self.decoder = Decoder(n_tgt_vocab=n_tgt_vocab, d_word_vec=d_word_vec, n_layers=n_layers, n_head=n_head, 
                                d_k=d_k, d_v=d_v, d_model=d_model, d_inner=d_inner, pad_idx=trg_pad_idx, 
                               dropout=dropout, scale_emb=scale_emb)
-        self.trg_word_proj = nn.Linear(d_model, n_tgt_vocab, bias=False)
+        self.trg_word_proj = nn.Linear(d_model, n_tgt_vocab, bias_attr=False)
 
         # 根据参数共享权重
         if tgt_emb_prj_weight_sharing:
-            self.trg_word_proj.weight = self.decoder.trg_word_emb.weight
+            weight_tensor = paddle.to_tensor(self.decoder.trg_word_emb.weight.numpy().T)
+            param_attr = paddle.ParamAttr(initializer=paddle.nn.initializer.Assign(weight_tensor))
+            self.trg_word_proj = nn.Linear(d_model, n_tgt_vocab, bias_attr=False, weight_attr=param_attr)
         if emb_src_trg_weight_sharing:
             self.encoder.src_word_emb.weight = self.decoder.trg_word_emb.weight
+        print(self.trg_word_proj.weight.shape, self.encoder.src_word_emb.weight.shape)
 
     def forward(self, src_seq, trg_seq):
         """
@@ -271,8 +264,11 @@ class Transformer(nn.Module):
         # 解码输出序列
         dec_output, *_ = self.decoder(trg_seq, enc_output, trg_mask, src_mask)
         # 序列logits
+        print(dec_output.shape)
         seq_logits = self.trg_word_proj(dec_output)
+        print(seq_logits.shape)
+        print(seq_logits.shape[-1])
         # 如果需要，对logits进行缩放
         if self.scale_prj:
             seq_logits *= self.dmodel ** -0.5
-        return seq_logits.view(-1, seq_logits.size(-1))
+        return seq_logits.reshape([-1, seq_logits.shape[-1]])
